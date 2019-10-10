@@ -53,7 +53,9 @@
 #include "MEM_guardedalloc.h"
 
 // headers for fluidsim bobj meshes
+#ifdef WITH_MOD_FLUID
 #include "LBM_fluidsim.h"
+#endif
 
 void fluidsim_init(FluidsimModifierData *fluidmd)
 {
