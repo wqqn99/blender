@@ -51,7 +51,9 @@
 #  include "DEG_depsgraph.h"
 #  include "DEG_depsgraph_build.h"
 
+#  ifdef WITH_SMOKE
 #  include "smoke_API.h"
+#endif
 
 static void rna_Smoke_update(Main *UNUSED(bmain), Scene *UNUSED(scene), PointerRNA *ptr)
 {
