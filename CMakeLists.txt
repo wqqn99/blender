@@ -230,7 +230,7 @@ mark_as_advanced(BUILDINFO_OVERRIDE_TIME)
 option(WITH_IK_ITASC      "Enable ITASC IK solver (only disable for development & for incompatible C++ compilers)" ON)
 option(WITH_IK_SOLVER     "Enable Legacy IK solver (only disable for development)" ON)
 option(WITH_FFTW3         "Enable FFTW3 support (Used for smoke, ocean sim, and audio effects)" ${_init_FFTW3})
-option(WITH_BULLET        "Enable Bullet (Physics Engine)" ON)
+option(WITH_BULLET        "Enable Bullet (Physics Engine)" OFF)
 option(WITH_SYSTEM_BULLET "Use the systems bullet library (currently unsupported due to missing features in upstream!)" )
 mark_as_advanced(WITH_SYSTEM_BULLET)
 option(WITH_OPENCOLORIO   "Enable OpenColorIO color management" ${_init_OPENCOLORIO})
@@ -238,7 +238,7 @@ option(WITH_OPENCOLORIO   "Enable OpenColorIO color management" ${_init_OPENCOLO
 # Compositor
 option(WITH_COMPOSITOR         "Enable the tile based nodal compositor" ON)
 
-option(WITH_OPENSUBDIV    "Enable OpenSubdiv for surface subdivision" ${_init_OPENSUBDIV})
+option(WITH_OPENSUBDIV    "Enable OpenSubdiv for surface subdivision" OFF) #${_init_OPENSUBDIV})
 
 option(WITH_OPENVDB       "Enable features relying on OpenVDB" OFF)
 option(WITH_OPENVDB_BLOSC "Enable blosc compression for OpenVDB, only enable if OpenVDB was built with blosc support" OFF)
@@ -298,8 +298,8 @@ endif()
 
 
 # Modifiers
-option(WITH_MOD_FLUID           "Enable Elbeem Modifier (Fluid Simulation)" ON)
-option(WITH_MOD_SMOKE           "Enable Smoke Modifier (Smoke Simulation)" ON)
+option(WITH_MOD_FLUID           "Enable Elbeem Modifier (Fluid Simulation)" OFF)
+option(WITH_MOD_SMOKE           "Enable Smoke Modifier (Smoke Simulation)" OFF)
 option(WITH_MOD_REMESH          "Enable Remesh Modifier" ON)
 # option(WITH_MOD_CLOTH_ELTOPO    "Enable Experimental cloth solver" OFF)  # this is now only available in a branch
 # mark_as_advanced(WITH_MOD_CLOTH_ELTOPO)
