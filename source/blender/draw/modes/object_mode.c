@@ -441,7 +441,7 @@ static void OBJECT_engine_init(void *vedata)
       .vert = (const char *[]){lib, datatoc_edit_mesh_overlay_vert_glsl, NULL},
       .frag = (const char *[]){lib, datatoc_edit_mesh_overlay_frag_glsl, NULL},
       .defs =
-          (const char *[]){sh_cfg_data->def, use_geom_def, use_smooth_def, "#define EDGE\n", NULL},
+          (const char *[]){sh_cfg_data->def, use_geom_def, use_smooth_def, "#define EDGE\n #define BUILDUP_EDGE\n", NULL},
       .geom = (use_geom_shader) ? geom_sh_code : NULL,
   });
 
