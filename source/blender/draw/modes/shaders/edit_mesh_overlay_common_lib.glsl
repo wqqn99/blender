@@ -5,11 +5,15 @@ uniform bool selectEdges = true;
 vec4 EDIT_MESH_edge_color_outer(int edge_flag, int face_flag, float crease, float bweight)
 {
   vec4 color = vec4(0.0);
+#ifdef BUILDUP_EDGE
+  color = vec4(0.263, 1, 0.639, 1); // FAN_TODO: THe color need to be in color palette
+#else
   color = ((edge_flag & EDGE_FREESTYLE) != 0) ? colorEdgeFreestyle : color;
   color = ((edge_flag & EDGE_SHARP) != 0) ? colorEdgeSharp : color;
   color = (crease > 0.0) ? vec4(colorEdgeCrease.rgb, crease) : color;
   color = (bweight > 0.0) ? vec4(colorEdgeBWeight.rgb, bweight) : color;
   color = ((edge_flag & EDGE_SEAM) != 0) ? colorEdgeSeam : color;
+#endif
   return color;
 }
 

@@ -56,6 +56,9 @@
 #include "BKE_tracking.h"
 
 #include "BLI_ghash.h"
+#include "BLI_string_utils.h"
+
+#include "draw_cache_impl.h"
 
 #include "IMB_imbuf_types.h"
 
@@ -75,6 +78,8 @@
 #include "draw_common.h"
 
 #include "DEG_depsgraph_query.h"
+
+#define BUILD_UP
 
 extern char datatoc_object_outline_prepass_vert_glsl[];
 extern char datatoc_object_outline_prepass_geom_glsl[];
@@ -103,6 +108,12 @@ extern char datatoc_common_fullscreen_vert_glsl[];
 extern char datatoc_gpu_shader_uniform_color_frag_glsl[];
 extern char datatoc_gpu_shader_3D_vert_glsl[];
 
+extern char datatoc_edit_mesh_overlay_common_lib_glsl[];
+extern char datatoc_edit_mesh_overlay_frag_glsl[];
+extern char datatoc_edit_mesh_overlay_vert_glsl[];
+extern char datatoc_edit_mesh_overlay_geom_glsl[];
+extern char datatoc_edit_mesh_overlay_mix_frag_glsl[];
+
 /* *********** LISTS *********** */
 typedef struct OBJECT_PassList {
   struct DRWPass *non_meshes[2];
@@ -110,6 +121,8 @@ typedef struct OBJECT_PassList {
   struct DRWPass *transp_shapes[2];
   struct DRWPass *ob_center;
   struct DRWPass *outlines;
+  struct DRWPass *buildup_outlines;
+  struct DRWPass *buildup_overlay_mix;
   struct DRWPass *outlines_search;
   struct DRWPass *outlines_expand;
   struct DRWPass *outlines_bleed;
@@ -155,6 +168,8 @@ typedef struct OBJECT_Shaders {
   GPUShader *outline_detect_wire;
   GPUShader *outline_fade;
   GPUShader *outline_fade_large;
+  GPUShader *buildup_overlay_edge;
+  GPUShader *buildup_overlay_mix;
 
   /* regular shaders */
   GPUShader *object_camera_image;
@@ -268,6 +283,8 @@ typedef struct OBJECT_ShadingGroupList {
   DRWShadingGroup *points_dupli;
   DRWShadingGroup *points_dupli_select;
 
+  DRWShadingGroup *buildup_outlines;
+
   /* Texture Space */
   DRWCallBuffer *texspace;
 } OBJECT_ShadingGroupList;
@@ -301,6 +318,8 @@ typedef struct OBJECT_PrivateData {
   DRWCallBuffer *center_deselected;
   DRWCallBuffer *center_selected_lib;
   DRWCallBuffer *center_deselected_lib;
+
+  DRWView *buildup_outlines_view;
 
   /* Outlines id offset (accessed as an array) */
   int id_ofs_active;
@@ -386,8 +405,13 @@ static void OBJECT_engine_init(void *vedata)
     /* XXX TODO GPU_R16UI can overflow, it would cause no harm
      * (only bad colored or missing outlines) but we should
      * use 32bits only if the scene have that many objects */
+#ifdef BUILD_UP
+    e_data.outlines_id_tx = DRW_texture_pool_query_2d(
+        size[0], size[1], GPU_RGBA8, &draw_engine_object_type);
+#else
     e_data.outlines_id_tx = DRW_texture_pool_query_2d(
         size[0], size[1], GPU_R16UI, &draw_engine_object_type);
+#endif
 
     GPU_framebuffer_ensure_config(&fbl->outlines_fb,
                                   {GPU_ATTACHMENT_TEXTURE(e_data.outlines_depth_tx),
@@ -411,6 +435,33 @@ static void OBJECT_engine_init(void *vedata)
   OBJECT_Shaders *sh_data = &e_data.sh_data[draw_ctx->sh_cfg];
 
   const GPUShaderConfigData *sh_cfg_data = &GPU_shader_cfg_data[draw_ctx->sh_cfg];
+
+  const bool use_geom_shader = true;
+  char *lib = BLI_string_joinN(sh_cfg_data->lib,
+                               datatoc_common_globals_lib_glsl,
+                               datatoc_common_view_lib_glsl,
+                               datatoc_edit_mesh_overlay_common_lib_glsl);
+  const char *geom_sh_code[] = {lib, datatoc_edit_mesh_overlay_geom_glsl, NULL};
+  if (!use_geom_shader) {
+    geom_sh_code[0] = NULL;
+  }
+  const char *use_geom_def = use_geom_shader ? "#define USE_GEOM_SHADER\n" : "";
+  const char *use_smooth_def = (U.gpu_flag & USER_GPU_FLAG_NO_EDIT_MODE_SMOOTH_WIRE) ?
+                                   "" :
+                                   "#define USE_SMOOTH_WIRE\n";
+  sh_data->buildup_overlay_edge = GPU_shader_create_from_arrays({
+      .vert = (const char *[]){lib, datatoc_edit_mesh_overlay_vert_glsl, NULL},
+      .frag = (const char *[]){lib, datatoc_edit_mesh_overlay_frag_glsl, NULL},
+      .defs = (const char *[]){sh_cfg_data->def,
+                               use_geom_def,
+                               use_smooth_def,
+                               "#define EDGE\n #define BUILDUP_EDGE\n",
+                               NULL},
+      .geom = (use_geom_shader) ? geom_sh_code : NULL,
+  });
+
+  sh_data->buildup_overlay_mix = DRW_shader_create_fullscreen(datatoc_edit_mesh_overlay_mix_frag_glsl,
+                                                  NULL);
 
   if (!sh_data->outline_resolve) {
     /* Outline */
@@ -706,6 +757,14 @@ static void OBJECT_engine_init(void *vedata)
 
   copy_v2_v2(e_data.inv_viewport_size, DRW_viewport_size_get());
   invert_v2(e_data.inv_viewport_size);
+
+  // for depth priority
+  OBJECT_StorageList *stl = ((OBJECT_Data *)vedata)->stl;
+  if (stl && !stl->g_data) {
+    stl->g_data = MEM_mallocN(sizeof(*stl->g_data), __func__);
+  }
+
+  stl->g_data->buildup_outlines_view = DRW_view_create_with_zoffset(draw_ctx->rv3d, 1.0f);
 }
 
 static void OBJECT_engine_free(void)
@@ -1532,6 +1591,36 @@ static void OBJECT_cache_init(void *vedata)
     DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_LESS_EQUAL | DRW_STATE_BLEND_ALPHA;
     psl->camera_images_back = DRW_pass_create("Camera Images Back", state);
     psl->camera_images_front = DRW_pass_create("Camera Images Front", state);
+  }
+
+  {
+    psl->buildup_outlines = DRW_pass_create(
+        "Mesh Edges",
+        DRW_STATE_WRITE_COLOR | DRW_STATE_FIRST_VERTEX_CONVENTION | DRW_STATE_DEPTH_LESS_EQUAL |
+            DRW_STATE_BLEND_ALPHA);
+    DRWShadingGroup *grp = DRW_shgroup_create(sh_data->buildup_overlay_edge,
+                                              psl->buildup_outlines);
+    DRW_shgroup_uniform_block(grp, "globalsBlock", G_draw.block_ubo);
+    DRW_shgroup_uniform_vec2(grp, "viewportSize", DRW_viewport_size_get(), 1);
+    DRW_shgroup_uniform_vec2(grp, "viewportSizeInv", DRW_viewport_invert_size_get(), 1);
+    // DRW_shgroup_uniform_ivec4(grp, "dataMask", data_mask, 1);
+    DRW_shgroup_uniform_bool_copy(grp, "selectEdges", false);
+
+    for (int i = 0; i < 2; ++i) {
+      OBJECT_ShadingGroupList *sgl = (i == 1) ? &stl->g_data->sgl_ghost : &stl->g_data->sgl;
+      sgl->buildup_outlines = grp;
+    }
+
+    struct GPUBatch *quad = DRW_cache_fullscreen_quad_get();
+    psl->buildup_overlay_mix = DRW_pass_create("Mix Overlay",
+                                       DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_ALPHA);
+    DRWShadingGroup *mix_shgrp = DRW_shgroup_create(sh_data->buildup_overlay_mix,
+                                                    psl->buildup_overlay_mix);
+    DRW_shgroup_call(mix_shgrp, quad, NULL);
+    DRW_shgroup_uniform_float_copy(mix_shgrp, "alpha", draw_ctx->v3d->overlay.backwire_opacity);
+    DRW_shgroup_uniform_texture_ref(mix_shgrp, "wireColor", &e_data.outlines_color_tx);
+    DRW_shgroup_uniform_texture_ref(mix_shgrp, "wireDepth", &e_data.outlines_depth_tx);
+    DRW_shgroup_uniform_texture_ref(mix_shgrp, "sceneDepth", &dtxl->depth);
   }
 
   for (int i = 0; i < 2; ++i) {
@@ -3458,6 +3547,11 @@ static void OBJECT_cache_populate(void *vedata, Object *ob)
       struct GPUBatch *geom;
       DRWShadingGroup *shgroup = NULL;
 
+      if (ob->type == OB_MESH) {
+        struct GPUBatch *geom_edges = DRW_mesh_batch_cache_get_all_edges(ob->data);
+        DRW_shgroup_call_no_cull(sgl->buildup_outlines, geom_edges, ob);
+      }
+      
       /* This fixes only the biggest case which is a plane in ortho view. */
       int flat_axis = 0;
       bool is_flat_object_viewed_from_side = ((rv3d->persp == RV3D_ORTHO) &&
@@ -3811,6 +3905,18 @@ static void OBJECT_draw_scene(void *vedata)
 
   DRW_draw_pass(stl->g_data->sgl.image_empties);
 
+#ifdef BUILD_UP
+  if (DRW_state_is_fbo() && outline_calls > 0) {
+    //GPU_framebuffer_bind(fbl->outlines_fb);
+    //GPU_framebuffer_clear_color_depth(fbl->outlines_fb, clearcol, 1.0f);
+    //DRW_view_set_active(stl->g_data->buildup_outlines_view);
+    DRW_draw_pass(psl->buildup_outlines);
+    //DRW_view_set_active(NULL);
+    //GPU_framebuffer_bind(dfbl->color_only_fb);
+    //DRW_draw_pass(psl->buildup_overlay_mix);
+  }
+
+#else// remove the default silhouette outline
   if (DRW_state_is_fbo() && outline_calls > 0) {
     DRW_stats_group_start("Outlines");
 
@@ -3829,6 +3935,7 @@ static void OBJECT_draw_scene(void *vedata)
     GPU_framebuffer_bind(fbl->outlines_fb);
     GPU_framebuffer_clear_color_depth(fbl->outlines_fb, clearcol, 1.0f);
     DRW_draw_pass(psl->outlines);
+    DRW_draw_pass(psl->buildup_outlines);
     DRW_draw_pass(psl->lightprobes);
 
     /* Search outline pixels */
@@ -3851,6 +3958,7 @@ static void OBJECT_draw_scene(void *vedata)
     /* Render probes spheres/planes so we can select them. */
     DRW_draw_pass(psl->lightprobes);
   }
+#endif
 
   if (DRW_state_is_fbo()) {
     if (e_data.draw_grid) {
