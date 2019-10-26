@@ -79,6 +79,8 @@
 
 #include "DEG_depsgraph_query.h"
 
+#define BUILD_UP
+
 extern char datatoc_object_outline_prepass_vert_glsl[];
 extern char datatoc_object_outline_prepass_geom_glsl[];
 extern char datatoc_object_outline_prepass_frag_glsl[];
@@ -110,6 +112,7 @@ extern char datatoc_edit_mesh_overlay_common_lib_glsl[];
 extern char datatoc_edit_mesh_overlay_frag_glsl[];
 extern char datatoc_edit_mesh_overlay_vert_glsl[];
 extern char datatoc_edit_mesh_overlay_geom_glsl[];
+extern char datatoc_edit_mesh_overlay_mix_frag_glsl[];
 
 /* *********** LISTS *********** */
 typedef struct OBJECT_PassList {
@@ -119,6 +122,7 @@ typedef struct OBJECT_PassList {
   struct DRWPass *ob_center;
   struct DRWPass *outlines;
   struct DRWPass *buildup_outlines;
+  struct DRWPass *buildup_overlay_mix;
   struct DRWPass *outlines_search;
   struct DRWPass *outlines_expand;
   struct DRWPass *outlines_bleed;
@@ -165,6 +169,7 @@ typedef struct OBJECT_Shaders {
   GPUShader *outline_fade;
   GPUShader *outline_fade_large;
   GPUShader *buildup_overlay_edge;
+  GPUShader *buildup_overlay_mix;
 
   /* regular shaders */
   GPUShader *object_camera_image;
@@ -314,6 +319,8 @@ typedef struct OBJECT_PrivateData {
   DRWCallBuffer *center_selected_lib;
   DRWCallBuffer *center_deselected_lib;
 
+  DRWView *buildup_outlines_view;
+
   /* Outlines id offset (accessed as an array) */
   int id_ofs_active;
   int id_ofs_select;
@@ -398,8 +405,13 @@ static void OBJECT_engine_init(void *vedata)
     /* XXX TODO GPU_R16UI can overflow, it would cause no harm
      * (only bad colored or missing outlines) but we should
      * use 32bits only if the scene have that many objects */
+#ifdef BUILD_UP
+    e_data.outlines_id_tx = DRW_texture_pool_query_2d(
+        size[0], size[1], GPU_RGBA8, &draw_engine_object_type);
+#else
     e_data.outlines_id_tx = DRW_texture_pool_query_2d(
         size[0], size[1], GPU_R16UI, &draw_engine_object_type);
+#endif
 
     GPU_framebuffer_ensure_config(&fbl->outlines_fb,
                                   {GPU_ATTACHMENT_TEXTURE(e_data.outlines_depth_tx),
@@ -440,10 +452,16 @@ static void OBJECT_engine_init(void *vedata)
   sh_data->buildup_overlay_edge = GPU_shader_create_from_arrays({
       .vert = (const char *[]){lib, datatoc_edit_mesh_overlay_vert_glsl, NULL},
       .frag = (const char *[]){lib, datatoc_edit_mesh_overlay_frag_glsl, NULL},
-      .defs =
-          (const char *[]){sh_cfg_data->def, use_geom_def, use_smooth_def, "#define EDGE\n #define BUILDUP_EDGE\n", NULL},
+      .defs = (const char *[]){sh_cfg_data->def,
+                               use_geom_def,
+                               use_smooth_def,
+                               "#define EDGE\n #define BUILDUP_EDGE\n",
+                               NULL},
       .geom = (use_geom_shader) ? geom_sh_code : NULL,
   });
+
+  sh_data->buildup_overlay_mix = DRW_shader_create_fullscreen(datatoc_edit_mesh_overlay_mix_frag_glsl,
+                                                  NULL);
 
   if (!sh_data->outline_resolve) {
     /* Outline */
@@ -739,6 +757,14 @@ static void OBJECT_engine_init(void *vedata)
 
   copy_v2_v2(e_data.inv_viewport_size, DRW_viewport_size_get());
   invert_v2(e_data.inv_viewport_size);
+
+  // for depth priority
+  OBJECT_StorageList *stl = ((OBJECT_Data *)vedata)->stl;
+  if (stl && !stl->g_data) {
+    stl->g_data = MEM_mallocN(sizeof(*stl->g_data), __func__);
+  }
+
+  stl->g_data->buildup_outlines_view = DRW_view_create_with_zoffset(draw_ctx->rv3d, 1.0f);
 }
 
 static void OBJECT_engine_free(void)
@@ -1584,6 +1610,17 @@ static void OBJECT_cache_init(void *vedata)
       OBJECT_ShadingGroupList *sgl = (i == 1) ? &stl->g_data->sgl_ghost : &stl->g_data->sgl;
       sgl->buildup_outlines = grp;
     }
+
+    struct GPUBatch *quad = DRW_cache_fullscreen_quad_get();
+    psl->buildup_overlay_mix = DRW_pass_create("Mix Overlay",
+                                       DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_ALPHA);
+    DRWShadingGroup *mix_shgrp = DRW_shgroup_create(sh_data->buildup_overlay_mix,
+                                                    psl->buildup_overlay_mix);
+    DRW_shgroup_call(mix_shgrp, quad, NULL);
+    DRW_shgroup_uniform_float_copy(mix_shgrp, "alpha", draw_ctx->v3d->overlay.backwire_opacity);
+    DRW_shgroup_uniform_texture_ref(mix_shgrp, "wireColor", &e_data.outlines_color_tx);
+    DRW_shgroup_uniform_texture_ref(mix_shgrp, "wireDepth", &e_data.outlines_depth_tx);
+    DRW_shgroup_uniform_texture_ref(mix_shgrp, "sceneDepth", &dtxl->depth);
   }
 
   for (int i = 0; i < 2; ++i) {
@@ -3867,9 +3904,19 @@ static void OBJECT_draw_scene(void *vedata)
   MULTISAMPLE_SYNC_DISABLE(dfbl, dtxl);
 
   DRW_draw_pass(stl->g_data->sgl.image_empties);
-  DRW_draw_pass(psl->buildup_outlines);
 
-#if 0 // remove the default silhouette outline
+#ifdef BUILD_UP
+  if (DRW_state_is_fbo() && outline_calls > 0) {
+    //GPU_framebuffer_bind(fbl->outlines_fb);
+    //GPU_framebuffer_clear_color_depth(fbl->outlines_fb, clearcol, 1.0f);
+    //DRW_view_set_active(stl->g_data->buildup_outlines_view);
+    DRW_draw_pass(psl->buildup_outlines);
+    //DRW_view_set_active(NULL);
+    //GPU_framebuffer_bind(dfbl->color_only_fb);
+    //DRW_draw_pass(psl->buildup_overlay_mix);
+  }
+
+#else// remove the default silhouette outline
   if (DRW_state_is_fbo() && outline_calls > 0) {
     DRW_stats_group_start("Outlines");
 
