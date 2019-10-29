@@ -126,7 +126,7 @@ void DRW_globals_update(void)
   UI_GetThemeColor4fv(TH_CFRAME, gb->colorCurrentFrame);
 
   /* Grid */
-  UI_GetThemeColorShade4fv(TH_GRID, 10, gb->colorGrid);
+  UI_GetThemeColorShade4fv(TH_GRID, -75, gb->colorGrid);
   /* emphasise division lines lighter instead of darker, if background is darker than grid */
   UI_GetThemeColorShade4fv(
       TH_GRID,
@@ -136,9 +136,9 @@ void DRW_globals_update(void)
           -10,
       gb->colorGridEmphasise);
   /* Grid Axis */
-  UI_GetThemeColorBlendShade4fv(TH_GRID, TH_AXIS_X, 0.5f, -10, gb->colorGridAxisX);
-  UI_GetThemeColorBlendShade4fv(TH_GRID, TH_AXIS_Y, 0.5f, -10, gb->colorGridAxisY);
-  UI_GetThemeColorBlendShade4fv(TH_GRID, TH_AXIS_Z, 0.5f, -10, gb->colorGridAxisZ);
+  UI_GetThemeColorShade4fv(TH_GRID, -75, gb->colorGridAxisX);
+  UI_GetThemeColorShade4fv(TH_GRID, -75, gb->colorGridAxisY);
+  UI_GetThemeColorShade4fv(TH_GRID, -75, gb->colorGridAxisZ);
 
   UI_GetThemeColorShadeAlpha4fv(TH_TRANSFORM, 0, -80, gb->colorDeselect);
   UI_GetThemeColorShadeAlpha4fv(TH_WIRE, 0, -30, gb->colorOutline);
