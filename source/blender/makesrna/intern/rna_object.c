@@ -2332,6 +2332,13 @@ static void rna_def_object(BlenderRNA *brna)
        0,
        "Textured",
        "Display the object with textures (if textures are enabled in the viewport)"},
+      {OB_RENDER,
+       "RENDERED",
+       0,
+       "Rendered",
+       "Render view in viewport -- Buildup"},
+      {OB_SOLIDWIRE, "SOLIDWIRE", 0, "SolidWire", "Solid + Wire -- Buildup"},
+      {OB_SOLIDSELECTED, "SOLIDSELECTED", 0, "SolidSelected", "only shaded on selected items -- Buildup"},
       {0, NULL, 0, NULL, NULL},
   };
 

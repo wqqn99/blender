@@ -529,6 +529,8 @@ enum {
   OB_MATERIAL = 4,
   OB_TEXTURE = 5,
   OB_RENDER = 6,
+  OB_SOLIDWIRE = 7,
+  OB_SOLIDSELECTED = 8
 };
 
 /* dtx: flags (short) */

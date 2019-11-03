@@ -1281,6 +1281,11 @@ static void drw_engines_enable_from_engine(RenderEngineType *engine_type,
       use_drw_engine(&draw_engine_workbench_transparent);
       break;
 
+    case OB_SOLIDWIRE:
+    case OB_SOLIDSELECTED:
+      use_drw_engine(&draw_engine_workbench_solid);
+      break;
+
     case OB_SOLID:
       if (use_xray) {
         use_drw_engine(&draw_engine_workbench_transparent);

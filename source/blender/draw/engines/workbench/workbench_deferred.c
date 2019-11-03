@@ -1014,6 +1014,12 @@ void workbench_deferred_solid_cache_populate(WORKBENCH_Data *vedata, Object *ob)
   if (!(DRW_object_visibility_in_active_context(ob) & OB_VISIBLE_SELF)) {
     return;
   }
+
+  if (((ob->base_flag & BASE_SELECTED) == 0) && (draw_ctx->v3d->shading.type == OB_SOLIDSELECTED) &&
+        !DRW_state_is_scene_render()) {
+    return;
+  }
+
   if ((ob->dt < OB_SOLID) && !DRW_state_is_scene_render()) {
     return;
   }

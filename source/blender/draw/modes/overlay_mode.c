@@ -343,12 +343,15 @@ static void overlay_wire_color_get(const View3D *v3d,
 
 static void overlay_cache_populate(void *vedata, Object *ob)
 {
+  
   OVERLAY_Data *data = vedata;
   OVERLAY_StorageList *stl = data->stl;
   OVERLAY_PrivateData *pd = stl->g_data;
   const DRWContextState *draw_ctx = DRW_context_state_get();
-  View3D *v3d = draw_ctx->v3d;
 
+  if ((ob->base_flag & BASE_SELECTED) != 0) 
+    return;  // Buildup, do not use overlay
+  View3D *v3d = draw_ctx->v3d;
   if ((ob->dt < OB_WIRE) || (!DRW_object_is_renderable(ob) && (ob->dt != OB_WIRE))) {
     return;
   }
@@ -361,7 +364,7 @@ static void overlay_cache_populate(void *vedata, Object *ob)
   }
 
   if ((pd->overlay.flag & V3D_OVERLAY_WIREFRAMES) || (v3d->shading.type == OB_WIRE) ||
-      (ob->dtx & OB_DRAWWIRE) || (ob->dt == OB_WIRE)) {
+      (v3d->shading.type == OB_SOLIDWIRE) || (ob->dtx & OB_DRAWWIRE) || (ob->dt == OB_WIRE)) {
 
     /* Fast path for duplis. */
     OVERLAY_DupliData **dupli_data = (OVERLAY_DupliData **)DRW_duplidata_get(vedata);
