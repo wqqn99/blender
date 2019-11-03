@@ -364,7 +364,8 @@ static void overlay_cache_populate(void *vedata, Object *ob)
   }
 
   if ((pd->overlay.flag & V3D_OVERLAY_WIREFRAMES) || (v3d->shading.type == OB_WIRE) ||
-      (v3d->shading.type == OB_SOLIDWIRE) || (ob->dtx & OB_DRAWWIRE) || (ob->dt == OB_WIRE)) {
+      (v3d->shading.type == OB_SOLIDWIRE) || (v3d->shading.type == OB_SOLIDSELECTED) ||
+      (ob->dtx & OB_DRAWWIRE) || (ob->dt == OB_WIRE)) {
 
     /* Fast path for duplis. */
     OVERLAY_DupliData **dupli_data = (OVERLAY_DupliData **)DRW_duplidata_get(vedata);
